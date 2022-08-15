@@ -5,6 +5,8 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired, URL
 from flask_ckeditor import CKEditor, CKEditorField
+import datetime
+import bleach
 
 
 app = Flask(__name__)
@@ -37,6 +39,25 @@ class CreatePostForm(FlaskForm):
     body = StringField("Blog Content", validators=[DataRequired()])
     submit = SubmitField("Submit Post")
 
+## strips invalid tags/attributes
+def strip_invalid_html(content):
+    allowed_tags = ['a', 'abbr', 'acronym', 'address', 'b', 'br', 'div', 'dl', 'dt',
+                    'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img',
+                    'li', 'ol', 'p', 'pre', 'q', 's', 'small', 'strike',
+                    'span', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th',
+                    'thead', 'tr', 'tt', 'u', 'ul']
+
+    allowed_attrs = {
+        'a': ['href', 'target', 'title'],
+        'img': ['src', 'alt', 'width', 'height'],
+    }
+
+    cleaned = bleach.clean(content,
+                           tags=allowed_tags,
+                           attributes=allowed_attrs,
+                           strip=True)
+
+    return cleaned
 
 @app.route('/')
 def get_all_posts():
@@ -59,9 +80,44 @@ def about():
 def contact():
     return render_template("contact.html")
 
-@app.route("/edit_post")
-def edit_post():
-    pass
+@app.route("/edit-post/<post_id>")
+def edit_post(post_id):
+    post = BlogPost.query.get(post_id)
+    edit_form = CreatePostForm(obj=post)
+    if edit_form.validate_on_submit():
+        post.title = edit_form.title.data
+        post.subtitle = edit_form.subtitle.data
+        post.author = edit_form.author.data
+        post.img_url = edit_form.img_url.data
+        post.body = strip_invalid_html(edit_form.body.data)
+        db.session.commit()
+        return redirect(url_for("show_post", post_id=post.id))
+    return render_template("make-post.html", form=edit_form, is_edit=True)
+
+@app.route("/new_post")
+def new_post():
+    form = CreatePostForm()
+    if form.validate_on_submit():
+        title = form.title.data
+        subtitle = form.subtitle.data
+        author = form.author.data
+        img_url = form.img_url.data
+        body = strip_invalid_html(form.body.data)
+        date = datetime.today().strftime('%B %d,%Y')
+        post = BlogPost(title, subtitle, date, body, author, img_url)
+        db.session.add(post)
+        db.session.commit()
+        return redirect(url_for("get_all_posts"))
+    return render_template("make-post.html", form=form)
+
+@app.route("/delete/<post_id>")
+def delete(post_id):
+    post = BlogPost.query.get(post_id)
+    if post:
+        db.session.delete(post)
+        db.session.commit()
+        return redirect(url_for("get_all_posts"))
+
 
 if __name__ == "__main__":
     app.run(debug=True)
